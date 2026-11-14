@@ -87,6 +87,10 @@ function buildHome(world) {
   const O = orientToRoad(world, world.places.home, 15); const { origin, yaw } = O;
   const g = new THREE.Group(); g.position.copy(origin); g.rotation.y = yaw; g.name = 'home';
   const W = 24, D = 30;
+  // clear the real neighbouring footprints off our plot (they stay everywhere else)
+  const toW = (lx, lz) => [origin.x + lx * Math.cos(yaw) + lz * Math.sin(yaw), origin.z - lx * Math.sin(yaw) + lz * Math.cos(yaw)];
+  world.buildings.exclude([toW(-W / 2 - 3, -D / 2 - 3), toW(W / 2 + 3, -D / 2 - 3), toW(W / 2 + 3, D / 2 + 2), toW(-W / 2 - 3, D / 2 + 2)]);
+  world.buildings.exclude([toW(-8, D / 2), toW(8, D / 2), toW(8, D / 2 + 11), toW(-8, D / 2 + 11)]); // welcome-shot camera spot across the lane
   const cream = mat(0xf3ead8), capC = mat(0xd9ccb2), white = mat(0xfaf6ee), wood = mat(0x8a5a3a), glass = mat(0x1d2a33, { standard: true, roughness: 0.15, metalness: 0.6 });
   const gold = mat(0xc9a24a, { standard: true, roughness: 0.35, metalness: 0.8 });
   // courtyard floor + garden strips

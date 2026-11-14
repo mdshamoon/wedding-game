@@ -55,13 +55,13 @@ export class CameraRig {
       const back = (t.speed ?? 0) < -1 ? -1 : 1;
       const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw);
       const spd = Math.abs(t.speed ?? 0);
-      const dist = this.dist + spd * 0.06;
+      const dist = (this.dist + spd * 0.06) * (cam.aspect < 1 ? 1.15 : 1);
       const want = new THREE.Vector3(t.pos.x - fx * dist * back, t.pos.y + this.height + spd * 0.015, t.pos.z - fz * dist * back);
       const lk = new THREE.Vector3(t.pos.x + Math.sin(t.heading) * this.lookAhead, t.pos.y + this.lookHeight, t.pos.z + Math.cos(t.heading) * this.lookAhead);
       if (snap) { this.pos.copy(want); this.look.copy(lk); }
       else { const k = 5 + spd * 0.18; this.pos.lerp(want, Math.min(1, dt * k)); this.look.lerp(lk, Math.min(1, dt * (8 + spd * 0.2))); }
       cam.position.copy(this.pos);
-      const fov = 58 + Math.min(14, spd * 0.35);
+      const fov = (cam.aspect < 1 ? 74 : 58) + Math.min(cam.aspect < 1 ? 8 : 14, spd * 0.35);
       if (Math.abs(cam.fov - fov) > 0.05) { cam.fov += (fov - cam.fov) * Math.min(1, dt * 2); cam.updateProjectionMatrix(); }
     } else if (this.mode === 'shot' && this.shot) {
       const s = this.shot; s.t += dt;

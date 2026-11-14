@@ -28,7 +28,7 @@ export const CONFIG = {
   // with attribution. To use your own provider, change url/attribution (keep {z}/{x}/{y}).
   tiles: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Imagery © Esri, Maxar, Earthstar Geographics · Roads © OpenStreetMap contributors',
+    attribution: 'Imagery © Esri, Maxar, Earthstar Geographics · Roads © OpenStreetMap contributors · Buildings: Overture Maps (Google Open Buildings, Microsoft, OSM)',
   },
 };
 

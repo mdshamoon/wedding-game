@@ -47,7 +47,14 @@ function asphaltBase(ctx, w, h, tone = 72, seed = 1) {
     ctx.ellipse(r() * w, r() * h, 20 + r() * 70, 14 + r() * 50, r() * 3, 0, 7);
     ctx.fill();
   }
-  speckle(ctx, w, h, 9000, ['#3d3d3f', '#58585a', '#8a8a88', '#6c6a66', '#2f2f31'], 1, 2.4, r);
+  const t = (d) => { const v = Math.max(0, Math.min(255, tone + d)); return `rgb(${v},${v},${v + 1})`; };
+  speckle(ctx, w, h, 9000, [t(-16), t(-8), t(8), t(14), t(-22)], 1, 2, r); // aggregate, low contrast
+  for (let i = 0; i < 22; i++) { // settled dust
+    ctx.fillStyle = `rgba(${150 + r() * 20},${132 + r() * 18},${105 + r() * 15},${0.03 + r() * 0.05})`;
+    ctx.beginPath(); ctx.ellipse(r() * w, r() * h, 8 + r() * 30, 30 + r() * 90, r() * 0.2, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(25,25,25,0.12)'; // tyre-polished wheel tracks
+  ctx.fillRect(w * 0.22, 0, w * 0.12, h); ctx.fillRect(w * 0.66, 0, w * 0.12, h);
   ctx.strokeStyle = 'rgba(30,30,30,0.35)'; ctx.lineWidth = 1.2; // cracks
   for (let i = 0; i < 10; i++) {
     let x = r() * w, y = r() * h; ctx.beginPath(); ctx.moveTo(x, y);
@@ -61,22 +68,22 @@ export const roadTextures = {
   // Highway / main road: edge lines + dashed centre. 1 texture repeat = 12 m along.
   major: () => once('rmajor', () => {
     const [c, ctx] = canvas(256, 512);
-    asphaltBase(ctx, 256, 512, 68, 3);
+    asphaltBase(ctx, 256, 512, 84, 3);
     // dusty edges
     const g = ctx.createLinearGradient(0, 0, 256, 0);
-    g.addColorStop(0, 'rgba(150,130,100,0.55)'); g.addColorStop(0.06, 'rgba(150,130,100,0)');
-    g.addColorStop(0.94, 'rgba(150,130,100,0)'); g.addColorStop(1, 'rgba(150,130,100,0.55)');
+    g.addColorStop(0, 'rgba(150,130,100,0.7)'); g.addColorStop(0.09, 'rgba(150,130,100,0)');
+    g.addColorStop(0.91, 'rgba(150,130,100,0)'); g.addColorStop(1, 'rgba(150,130,100,0.7)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 512);
-    ctx.fillStyle = 'rgba(235,235,225,0.85)';
-    ctx.fillRect(14, 0, 5, 512); ctx.fillRect(237, 0, 5, 512);
-    ctx.fillStyle = 'rgba(240,240,230,0.9)';
-    ctx.fillRect(125, 0, 6, 190);
+    // worn paint: broken edge lines and a faded dashed centre
+    const r = rng(9);
+    for (const x of [14, 237]) for (let y = 0; y < 512; y += 8) { ctx.fillStyle = `rgba(230,228,215,${r() < 0.25 ? 0.12 : 0.45 + r() * 0.2})`; ctx.fillRect(x, y, 5, 8); }
+    for (let y = 0; y < 190; y += 6) { ctx.fillStyle = `rgba(232,230,218,${r() < 0.2 ? 0.15 : 0.55 + r() * 0.2})`; ctx.fillRect(125, y, 6, 6); }
     return tex(c);
   }),
   // Town street: worn asphalt, no markings, dusty fade at the edges. 1 repeat = 8 m.
   street: () => once('rstreet', () => {
     const [c, ctx] = canvas(256, 256);
-    asphaltBase(ctx, 256, 256, 82, 7);
+    asphaltBase(ctx, 256, 256, 96, 7);
     const g = ctx.createLinearGradient(0, 0, 256, 0);
     g.addColorStop(0, 'rgba(160,140,110,0.9)'); g.addColorStop(0.12, 'rgba(160,140,110,0.0)');
     g.addColorStop(0.88, 'rgba(160,140,110,0.0)'); g.addColorStop(1, 'rgba(160,140,110,0.9)');
@@ -291,3 +298,187 @@ export function textTexture(text, { w = 1024, h = 256, font = '600 120px Marcell
   ctx.fillStyle = color; ctx.fillText(text, w / 2, h / 2);
   return tex(c, { repeat: false });
 }
+
+// ------------------------------------------------------------------ Kichha facade atlas
+// One texture holds every wall style as horizontal bands. Each band is ONE floor (3.2 m) tall and
+// 4 bays (14 m) wide; walls repeat in u and pick a band in v, so a whole chunk of town can share a
+// single material. Painted bands are near-white so per-building vertex colours tint the plaster.
+export const ATLAS = { U: 14, BANDS: 8, UPPER: 0, BALCONY: 1, ARCHED: 2, GROUND: 3, SHOP: 4, BRICK: 5, BLANK: 6, SHEET: 7 };
+export const facadeAtlas = () => once('atlas', () => {
+  const W = 1024, BH = 256, H = BH * ATLAS.BANDS, BW = 256;
+  const [c, ctx] = canvas(W, H);
+  const [ce, cte] = canvas(W, H);
+  const r = rng(2027);
+  cte.fillStyle = '#000'; cte.fillRect(0, 0, W, H);
+  const warm = ['#ffd28a', '#ffe0a8', '#ffc670', '#fff0c8', '#cfe3ff', '#ffb35c'];
+
+  // weathered plaster: speckle, damp patches, run-off streaks, dirty base
+  const plaster = (oy, base = '#f2eee6', dirt = 1) => {
+    ctx.fillStyle = base; ctx.fillRect(0, oy, W, BH);
+    ctx.save(); ctx.translate(0, oy);
+    speckle(ctx, W, BH, 5200, ['#e4dfd5', '#faf8f3', '#d8d1c4', '#ece6db'], 1, 3, r);
+    for (let i = 0; i < 14 * dirt; i++) { // damp / repaint patches
+      ctx.fillStyle = `rgba(${150 + r() * 40},${140 + r() * 35},${120 + r() * 30},${0.06 + r() * 0.08})`;
+      ctx.beginPath(); ctx.ellipse(r() * W, r() * BH, 20 + r() * 70, 10 + r() * 40, r() * 3, 0, 7); ctx.fill();
+    }
+    for (let i = 0; i < 46 * dirt; i++) { // vertical rain streaks
+      const x = r() * W, y0 = r() < 0.6 ? 0 : r() * BH * 0.5, h = BH * (0.3 + r() * 0.7);
+      const g = ctx.createLinearGradient(0, y0, 0, y0 + h);
+      g.addColorStop(0, `rgba(70,64,55,${0.12 + r() * 0.18})`); g.addColorStop(1, 'rgba(70,64,55,0)');
+      ctx.fillStyle = g; ctx.fillRect(x, y0, 2 + r() * 7, h);
+    }
+    ctx.restore();
+  };
+  const band = (oy, h = 7) => { ctx.fillStyle = 'rgba(110,100,86,0.45)'; ctx.fillRect(0, oy, W, h); };
+  const grill = (k, x, y, w, h, kind) => {
+    k.save(); k.beginPath(); k.rect(x, y, w, h); k.clip();
+    k.strokeStyle = 'rgba(28,28,30,0.9)'; k.lineWidth = 3;
+    if (kind === 0) for (let gx = x + 14; gx < x + w; gx += 14) { k.beginPath(); k.moveTo(gx, y); k.lineTo(gx, y + h); k.stroke(); }
+    else if (kind === 1) { // diamond lattice
+      for (let gx = x - h; gx < x + w + h; gx += 28) { k.beginPath(); k.moveTo(gx, y); k.lineTo(gx + h, y + h); k.stroke(); k.beginPath(); k.moveTo(gx + h, y); k.lineTo(gx, y + h); k.stroke(); }
+    } else { for (let gx = x + 18; gx < x + w; gx += 18) { k.beginPath(); k.moveTo(gx, y); k.lineTo(gx, y + h); k.stroke(); } for (let gy = y + 22; gy < y + h; gy += 22) { k.beginPath(); k.moveTo(x, gy); k.lineTo(x + w, gy); k.stroke(); } }
+    k.restore();
+    k.strokeStyle = 'rgba(28,28,30,0.9)'; k.lineWidth = 4; k.strokeRect(x, y, w, h);
+  };
+  // a window with frame, glass/curtain, grill, concrete chhajja (sunshade) and its stain
+  const windowAt = (oy, ox, wx, wy, ww, wh, arched = false, lit = 0.45) => {
+    const path = (k) => { k.beginPath(); if (arched) { k.moveTo(wx, wy + wh); k.lineTo(wx, wy + ww / 2); k.arc(wx + ww / 2, wy + ww / 2, ww / 2, Math.PI, 0); k.lineTo(wx + ww, wy + wh); k.closePath(); } else k.rect(wx, wy, ww, wh); };
+    ctx.fillStyle = 'rgba(205,196,180,0.9)'; ctx.fillRect(wx - 7, wy - 6, ww + 14, wh + 12);
+    ctx.fillStyle = '#262b2e'; path(ctx); ctx.fill();
+    const curtain = ['#7a3b3b', '#3d5a7a', '#8a7a3a', '#5a7a5a', '#6a4a7a', '#9a6a4a'][(r() * 6) | 0];
+    if (r() < 0.55) { ctx.fillStyle = curtain; ctx.globalAlpha = 0.75; ctx.fillRect(wx + 4, wy + 4, ww * (0.3 + r() * 0.5), wh - 8); ctx.globalAlpha = 1; }
+    const gg = ctx.createLinearGradient(wx, wy, wx + ww, wy + wh);
+    gg.addColorStop(0, 'rgba(170,195,210,0.35)'); gg.addColorStop(1, 'rgba(60,80,95,0.08)');
+    ctx.fillStyle = gg; path(ctx); ctx.fill();
+    if (r() < lit) {
+      const col = warm[(r() * warm.length) | 0];
+      const eg = cte.createRadialGradient(wx + ww / 2, wy + wh / 2, 4, wx + ww / 2, wy + wh / 2, ww * 0.85);
+      eg.addColorStop(0, col); eg.addColorStop(1, 'rgba(120,70,20,0.55)');
+      cte.fillStyle = eg; path(cte); cte.fill();
+    }
+    grill(ctx, wx, wy, ww, wh, (r() * 3) | 0);
+    // chhajja + the dark stain it leaves
+    ctx.fillStyle = 'rgba(95,88,76,0.75)'; ctx.fillRect(wx - 18, wy - 16, ww + 36, 9);
+    ctx.fillStyle = 'rgba(60,55,48,0.25)'; ctx.fillRect(wx - 18, wy - 7, ww + 36, 5);
+    const sg = ctx.createLinearGradient(0, wy + wh, 0, wy + wh + 40); sg.addColorStop(0, 'rgba(70,64,55,0.28)'); sg.addColorStop(1, 'rgba(70,64,55,0)');
+    ctx.fillStyle = sg; ctx.fillRect(wx + 4, wy + wh + 6, ww - 8, 40);
+  };
+
+  // 0 UPPER: grilled windows, odd blank bay, AC unit now and then
+  let oy = ATLAS.UPPER * BH; plaster(oy); band(oy);
+  for (let b = 0; b < 4; b++) {
+    const ox = b * BW;
+    if (b === 2) { windowAt(oy, ox, ox + 100, oy + 80, 56, 70); continue; } // small bathroom window
+    windowAt(oy, ox, ox + 70, oy + 66, 116, 104);
+    if (b === 1) { ctx.fillStyle = '#d9d6cf'; ctx.fillRect(ox + 196, oy + 120, 50, 34); ctx.fillStyle = '#9a978f'; for (let i = 0; i < 6; i++) ctx.fillRect(ox + 200, oy + 124 + i * 5, 42, 2); }
+  }
+  // 1 BALCONY: door + window, railing slab
+  oy = ATLAS.BALCONY * BH; plaster(oy); band(oy);
+  for (let b = 0; b < 4; b++) {
+    const ox = b * BW;
+    if (b % 2 === 0) { // balcony door
+      ctx.fillStyle = '#5a3d2a'; ctx.fillRect(ox + 86, oy + 60, 84, 180);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(ox + 126, oy + 64, 3, 172);
+      if (r() < 0.4) { cte.fillStyle = '#ffcf85'; cte.fillRect(ox + 90, oy + 64, 76, 60); }
+    } else windowAt(oy, ox, ox + 70, oy + 66, 116, 100);
+    ctx.fillStyle = 'rgba(120,112,98,0.9)'; ctx.fillRect(ox, oy + 236, BW, 14); // slab edge
+    ctx.fillStyle = 'rgba(40,40,42,0.9)'; ctx.fillRect(ox + 6, oy + 176, BW - 12, 5);
+    for (let x = ox + 10; x < ox + BW - 6; x += 11) ctx.fillRect(x, oy + 178, 3, 58);
+    if (r() < 0.5) { ctx.fillStyle = ['#b8423a', '#3a6ab8', '#e0b030', '#3a9a6a'][(r() * 4) | 0]; ctx.globalAlpha = 0.8; ctx.fillRect(ox + 20 + r() * 120, oy + 150, 40 + r() * 40, 30); ctx.globalAlpha = 1; } // laundry
+  }
+  // 2 ARCHED: older-style arched windows with jaali
+  oy = ATLAS.ARCHED * BH; plaster(oy); band(oy);
+  for (let b = 0; b < 4; b++) windowAt(oy, b * BW, b * BW + 78, oy + 52, 100, 128, true);
+  // 3 GROUND (house): door, grilled window, dirty plinth, meter box
+  oy = ATLAS.GROUND * BH; plaster(oy, '#f0ebe2', 1.4);
+  for (let b = 0; b < 4; b++) {
+    const ox = b * BW;
+    if (b === 1) {
+      const dc = ['#6b4a32', '#3f5f7a', '#6a6a6a', '#2f5a3e'][(r() * 4) | 0];
+      ctx.fillStyle = 'rgba(205,196,180,0.9)'; ctx.fillRect(ox + 72, oy + 54, 112, 202);
+      ctx.fillStyle = dc; ctx.fillRect(ox + 80, oy + 62, 96, 194);
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 3; ctx.strokeRect(ox + 88, oy + 72, 36, 70); ctx.strokeRect(ox + 132, oy + 72, 36, 70); ctx.strokeRect(ox + 88, oy + 156, 36, 80); ctx.strokeRect(ox + 132, oy + 156, 36, 80);
+      ctx.fillStyle = 'rgba(95,88,76,0.75)'; ctx.fillRect(ox + 60, oy + 40, 136, 10);
+      ctx.fillStyle = '#7a1f1f'; ctx.fillRect(ox + 210, oy + 120, 24, 30); // meter box
+    } else windowAt(oy, ox, ox + 74, oy + 78, 108, 96, false, 0.5);
+  }
+  const plinth = ctx.createLinearGradient(0, oy + BH - 34, 0, oy + BH); plinth.addColorStop(0, 'rgba(90,78,62,0.0)'); plinth.addColorStop(0.3, 'rgba(90,78,62,0.45)'); plinth.addColorStop(1, 'rgba(70,60,48,0.7)');
+  ctx.fillStyle = plinth; ctx.fillRect(0, oy + BH - 34, W, 34);
+  // 4 SHOP: rolling shutters (open with goods, half or closed), lintel for the signboard
+  oy = ATLAS.SHOP * BH; plaster(oy, '#ebe6dc', 1.4);
+  ctx.fillStyle = 'rgba(100,92,80,0.55)'; ctx.fillRect(0, oy + 36, W, 12);
+  for (let b = 0; b < 4; b++) {
+    const ox = b * BW + 10, sw = BW - 20, top = oy + 50;
+    const state = r(); const open = state < 0.62 ? 1 : state < 0.82 ? 0.45 : 0;
+    // interior
+    ctx.fillStyle = '#2a231d'; ctx.fillRect(ox, top, sw, BH - 50);
+    ctx.fillStyle = '#5a4634'; for (const y of [top + 80, top + 120, top + 160]) ctx.fillRect(ox + 4, y, sw - 8, 4);
+    for (let i = 0; i < 70; i++) { ctx.fillStyle = `hsl(${(r() * 360) | 0},${30 + r() * 40}%,${35 + r() * 30}%)`; ctx.fillRect(ox + 6 + r() * (sw - 16), top + 60 + ((r() * 3) | 0) * 40 + r() * 8, 4 + r() * 8, 8 + r() * 14); }
+    ctx.fillStyle = 'rgba(255,225,160,0.16)'; ctx.fillRect(ox, top, sw, BH - 50);
+    cte.fillStyle = '#000';
+    if (open > 0) { const g = cte.createLinearGradient(0, top, 0, oy + BH); g.addColorStop(0, '#ffe9b8'); g.addColorStop(1, '#a86a2c'); cte.fillStyle = g; cte.fillRect(ox, top + (BH - 50) * (1 - open), sw, (BH - 50) * open); }
+    // shutter slats
+    const shc = ['#8f969a', '#6f8fa8', '#7d9a7d', '#a3a3a3', '#5d7c99'][(r() * 5) | 0];
+    const sh = (BH - 50) * (1 - open);
+    ctx.fillStyle = shc; ctx.fillRect(ox, top, sw, sh);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)'; for (let y = top; y < top + sh; y += 7) ctx.fillRect(ox, y, sw, 2);
+    if (sh > 10) { ctx.fillStyle = 'rgba(40,40,40,0.6)'; ctx.fillRect(ox, top + sh - 6, sw, 6); }
+    ctx.fillStyle = 'rgba(60,60,60,0.8)'; ctx.fillRect(ox - 4, top, 4, BH - 50); ctx.fillRect(ox + sw, top, 4, BH - 50);
+  }
+  // 5 BRICK: exposed red brick (unplastered house / unfinished floor) with plain openings
+  oy = ATLAS.BRICK * BH;
+  ctx.fillStyle = '#9c5a3c'; ctx.fillRect(0, oy, W, BH);
+  for (let y = 0; y < BH; y += 9) for (let x = (y / 9) % 2 ? -14 : 0; x < W; x += 28) {
+    const t = r(); ctx.fillStyle = `rgb(${140 + t * 40},${70 + t * 25},${48 + t * 18})`; ctx.fillRect(x + 1, oy + y + 1, 26, 7);
+  }
+  ctx.fillStyle = 'rgba(200,190,170,0.18)'; for (let y = 0; y < BH; y += 9) ctx.fillRect(0, oy + y, W, 1.5);
+  for (let b = 0; b < 4; b++) if (b !== 2) {
+    const ox = b * BW; ctx.fillStyle = '#9a9488'; ctx.fillRect(ox + 66, oy + 58, 124, 8); // concrete lintel
+    ctx.fillStyle = '#1e1c1a'; ctx.fillRect(ox + 74, oy + 66, 108, 100);
+    if (r() < 0.35) { cte.fillStyle = '#ffc878'; cte.fillRect(ox + 74, oy + 66, 108, 100); }
+    grill(ctx, ox + 74, oy + 66, 108, 100, 0);
+  }
+  ctx.fillStyle = 'rgba(120,118,112,0.9)'; ctx.fillRect(0, oy, W, 10); // slab band
+  // 6 BLANK: side walls / parapets / stair rooms, with a faded painted wall-ad on one bay
+  oy = ATLAS.BLANK * BH; plaster(oy, '#f0ece4', 1.6);
+  ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = '#c0392b'; ctx.fillRect(560, oy + 70, 300, 110);
+  ctx.fillStyle = '#f5e6c8'; ctx.font = 'bold 44px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('सीमेंट', 710, oy + 110); ctx.font = 'bold 22px sans-serif'; ctx.fillText('मज़बूत घर के लिए', 710, oy + 152); ctx.restore();
+  for (let i = 0; i < 5; i++) { ctx.strokeStyle = 'rgba(70,64,55,0.35)'; ctx.lineWidth = 1.5; ctx.beginPath(); let x = r() * W, y = oy + r() * BH; ctx.moveTo(x, y); for (let k = 0; k < 6; k++) { x += (r() - 0.5) * 30; y += 8 + r() * 12; ctx.lineTo(x, y); } ctx.stroke(); }
+  // 7 SHEET: corrugated metal (sheds, godowns)
+  oy = ATLAS.SHEET * BH;
+  for (let x = 0; x < W; x += 16) { const g = ctx.createLinearGradient(x, 0, x + 16, 0); g.addColorStop(0, '#d8dcdc'); g.addColorStop(0.5, '#f4f6f6'); g.addColorStop(1, '#b8bcbc'); ctx.fillStyle = g; ctx.fillRect(x, oy, 16, BH); }
+  for (let i = 0; i < 26; i++) { ctx.fillStyle = `rgba(130,80,40,${0.05 + r() * 0.12})`; ctx.fillRect(r() * W, oy + r() * BH, 10 + r() * 50, 6 + r() * 40); }
+  ctx.fillStyle = 'rgba(80,80,80,0.5)'; for (let x = 0; x < W; x += 256) ctx.fillRect(x, oy, 3, BH);
+
+  const map = tex(c), emissive = tex(ce);
+  for (const t of [map, emissive]) { t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; }
+  return { map, emissive };
+});
+
+// Flat-roof concrete, near-white so the satellite-sampled roof colour shows through.
+export const roofTextureLight = () => once('roofL', () => {
+  const [c, ctx] = canvas(256, 256);
+  const r = rng(41);
+  ctx.fillStyle = '#e6e2da'; ctx.fillRect(0, 0, 256, 256);
+  speckle(ctx, 256, 256, 5000, ['#d6d1c8', '#f2efe9', '#cbc5ba', '#ece8e0'], 1, 3, r);
+  for (let i = 0; i < 12; i++) { ctx.fillStyle = `rgba(80,76,68,${0.05 + r() * 0.1})`; ctx.beginPath(); ctx.ellipse(r() * 256, r() * 256, 16 + r() * 50, 8 + r() * 30, r() * 3, 0, 7); ctx.fill(); }
+  ctx.strokeStyle = 'rgba(90,86,78,0.18)'; ctx.lineWidth = 2; for (let i = 0; i <= 256; i += 64) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 256); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(256, i); ctx.stroke(); }
+  return tex(c);
+});
+
+// Highway median: dusty soil with clumps of grass and oleander-like shrubs. u across, v along (4 m).
+export const medianTexture = () => once('median', () => {
+  const [c, ctx] = canvas(128, 256);
+  const r = rng(61);
+  ctx.fillStyle = '#8f7c5e'; ctx.fillRect(0, 0, 128, 256);
+  speckle(ctx, 128, 256, 1800, ['#7d6b50', '#a08d6e', '#6f6048'], 1, 3, r);
+  for (let i = 0; i < 26; i++) {
+    const x = 20 + r() * 88, y = r() * 256, rad = 8 + r() * 18;
+    ctx.fillStyle = ['#4f6b33', '#5d7a3a', '#3f5a2a', '#6b8a45'][(r() * 4) | 0];
+    ctx.beginPath(); ctx.ellipse(x, y, rad, rad * 1.4, 0, 0, 7); ctx.fill();
+    if (r() < 0.3) { ctx.fillStyle = r() < 0.5 ? '#d9568a' : '#f2f0e6'; for (let k = 0; k < 5; k++) ctx.fillRect(x + (r() - 0.5) * rad, y + (r() - 0.5) * rad, 3, 3); }
+  }
+  ctx.fillStyle = '#d8d2c4'; ctx.fillRect(0, 0, 6, 256); ctx.fillRect(122, 0, 6, 256); // kerb tops
+  return tex(c);
+});

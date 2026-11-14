@@ -23,8 +23,9 @@ export class World {
   }
 
   async load(onProgress = () => {}) {
-    const [meta, roads, routes, buildings, trees] = await Promise.all([
+    const [meta, roads, routes, buildings, trees, street] = await Promise.all([
       getJSON('meta.json'), getJSON('roads.json'), getJSON('routes.json'), getJSON('buildings.json'), getJSON('trees.json'),
+      getJSON('street.json').catch(() => []),
     ]);
     onProgress(0.35);
     this.meta = meta;
@@ -39,9 +40,10 @@ export class World {
     this.root.add(this.roads.group);
     onProgress(0.5);
     await tick();
-    this.buildings = buildBuildings(buildings);
+    this.buildings = buildBuildings(buildings, street, this.net);
     this.colliders = this.buildings.colliders;
     this.root.add(this.buildings.group);
+    this.buildings.prime(new THREE.Vector3(), 650);
     onProgress(0.7);
     await tick();
     this.trees = buildVegetation(trees);
@@ -68,6 +70,11 @@ export class World {
   }
 
   update(focus, time, dt) {
+    if (!this.venues) return; // still loading
+    // a big jump (new chapter / cutscene) builds the town around the new spot right away
+    if (this._lastFocus && Math.hypot(focus.x - this._lastFocus.x, focus.z - this._lastFocus.z) > 500) this.buildings?.prime(focus, 520);
+    (this._lastFocus ||= new THREE.Vector3()).copy(focus);
+    this.buildings?.update(focus, QUALITY.viewDist * 0.75 + CHUNK * 0.7, 5);
     this.focus.copy(focus);
     this.sky.update(focus);
     this.ground.update(focus, time);

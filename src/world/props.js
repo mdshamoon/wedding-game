@@ -37,9 +37,10 @@ export function buildProps(net, colliders) {
       const ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux;
       let t = spacing - carry;
       while (t < L) {
-        const x = ax + ux * t + nx * (hw + 2.2), z = az + uz * t + nz * (hw + 2.2);
+        let x = ax + ux * t + nx * (hw + 2.2), z = az + uz * t + nz * (hw + 2.2);
+        if (colliders.resolve(x, z, 0.5).hit) { x = ax + ux * t + nx * (hw + 0.9); z = az + uz * t + nz * (hw + 0.9); } // tight street: pole at the kerb
         const q = net.query(x, z);
-        if (q && q.edge > 0.8) {
+        if (q && q.edge > 0.5 && !colliders.resolve(x, z, 0.4).hit) {
           const ang = Math.atan2(ux, uz);
           const a = add(x, z, ang);
           if (prev && Math.hypot(prev[0] - x, prev[1] - z) < spacing * 1.6) a.wires.push([prev[0], prev[1], prev[2], x, z, ang]);

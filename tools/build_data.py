@@ -1,6 +1,6 @@
 """Build game data from OpenStreetMap + satellite imagery.
 
-Run:  uv run --with pillow --with numpy python tools/build_data.py
+Run:  npm run data   (uv run --with pillow --with numpy --with duckdb python tools/build_data.py)
 Outputs into public/data/.
 
 Coordinate system (must match src/geo.js):
@@ -11,8 +11,12 @@ import json, math, os, sys, heapq, random, concurrent.futures as cf, urllib.requ
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import footprints as fp
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "data", "raw", "osm.json")
+FOOTPRINTS = os.path.join(ROOT, "data", "raw", "overture_buildings.csv")
 OUT = os.path.join(ROOT, "public", "data")
 TILE_CACHE = os.environ.get("TILE_CACHE", os.path.join(ROOT, "data", "tilecache"))
 os.makedirs(OUT, exist_ok=True)
@@ -43,6 +47,10 @@ MX0, MY0 = merc(LAT0, LON0)
 def to_local(lat, lon):
     mx, my = merc(lat, lon)
     return (mx - MX0) * K, -(my - MY0) * K
+
+
+def local_to_merc(x, z):
+    return x / K + MX0, MY0 - z / K
 
 
 WIDTH = {
@@ -85,6 +93,7 @@ def build_roads(els):
             "t": hw, "n": t.get("name:en") or t.get("name") or t.get("ref") or "",
             "w": round(w, 1), "o": 1 if t.get("oneway") == "yes" else 0,
             "s": t.get("surface", ""), "p": flat,
+            "lanes": int(lanes) if lanes and lanes.isdigit() else 0,
         })
         if hw in SPEED:
             ids = e["nodes"]
@@ -99,6 +108,62 @@ def build_roads(els):
                 graph.setdefault(a, []).append((b, cost))
                 graph.setdefault(b, []).append((a, cost))
     return roads, graph, nodepos, nodetype
+
+
+def divided_carriageways(roads):
+    """Pair up one-way trunk/primary carriageways (e.g. NH9) and set realistic widths + a median.
+
+    For each one-way major road, find the opposite-direction carriageway running alongside. Its
+    width becomes lanes*3.5 m + a paved shoulder (capped so the two don't overlap) and "m" stores
+    the half-median width on the side where the other carriageway is (+ = right of travel).
+    """
+    cell = 40.0
+    grid = {}
+    ow = [i for i, r in enumerate(roads) if r["o"] and r["t"] in ("trunk", "primary")]
+    for i in ow:
+        p = roads[i]["p"]
+        for k in range(0, len(p) - 2, 2):
+            for gi in range(int(min(p[k], p[k + 2]) // cell) - 1, int(max(p[k], p[k + 2]) // cell) + 2):
+                for gj in range(int(min(p[k + 1], p[k + 3]) // cell) - 1, int(max(p[k + 1], p[k + 3]) // cell) + 2):
+                    grid.setdefault((gi, gj), []).append((i, p[k], p[k + 1], p[k + 2], p[k + 3]))
+    paired = 0
+    for i in ow:
+        r = roads[i]; p = r["p"]
+        seps, sides = [], []
+        for k in range(0, len(p) - 2, 2):
+            ax, az, bx, bz = p[k], p[k + 1], p[k + 2], p[k + 3]
+            L = math.hypot(bx - ax, bz - az)
+            if L < 1:
+                continue
+            ux, uz = (bx - ax) / L, (bz - az) / L
+            for t in np.arange(0, L, 12.0):
+                x, z = ax + ux * t, az + uz * t
+                best = None
+                for (j, cx1, cz1, cx2, cz2) in grid.get((int(x // cell), int(z // cell)), ()):
+                    if j == i:
+                        continue
+                    vl = math.hypot(cx2 - cx1, cz2 - cz1) or 1
+                    if (ux * (cx2 - cx1) + uz * (cz2 - cz1)) / vl > -0.8:
+                        continue  # not running the opposite way
+                    d = seg_dist(x, z, cx1, cz1, cx2, cz2)
+                    if 6 < d < 45 and (best is None or d < best[0]):
+                        vx, vz = cx2 - cx1, cz2 - cz1
+                        L2 = vl * vl; tt = max(0, min(1, ((x - cx1) * vx + (z - cz1) * vz) / L2))
+                        qx, qz = cx1 + vx * tt, cz1 + vz * tt
+                        best = (d, 1 if (qx - x) * (-uz) + (qz - z) * ux > 0 else -1)
+                if best:
+                    seps.append(best[0]); sides.append(best[1])
+        n_samples = max(1, int(sum(math.hypot(p[k + 2] - p[k], p[k + 3] - p[k + 1]) for k in range(0, len(p) - 2, 2)) / 12))
+        if len(seps) >= max(2, 0.5 * n_samples):
+            sep = float(np.median(seps))
+            lanes = r.get("lanes") or 2
+            want = min(max(lanes, 2), 3) * 3.5 + 1.5
+            w = max(7.0, min(want, sep - 2.0))
+            side = 1 if sum(sides) >= 0 else -1
+            r["w"] = round(w, 1)
+            r["m"] = round(side * (sep - w) / 2, 1)
+            paired += 1
+    print(f"divided carriageways paired: {paired}/{len(ow)}")
 
 
 def nearest_node(nodepos, nodetype, x, z, min_speed=0):
@@ -231,8 +296,9 @@ def built_mask(img, roadmask=None):
     if roadmask is not None:
         builtpx &= ~roadmask
     density = box_blur(builtpx.astype(np.float32), 6)  # ~25 m neighbourhood
+    fine = box_blur(builtpx.astype(np.float32), 1)     # ~6 m: is there roof right here?
     green = box_blur((veg > 0.06).astype(np.float32), 4)
-    return density, green, water
+    return density, green, water, fine
 
 
 # ---------------------------------------------------------------- building placement
@@ -264,8 +330,11 @@ def seg_dist(px, pz, ax, az, bx, bz):
     return math.hypot(px - qx, pz - qz)
 
 
-def place_buildings(roads, sample_density, venues):
+def place_buildings(roads, sample_density, venues, occ0=None, fine=None):
+    """Procedural row buildings along roads. With occ0 (cells taken by real footprints) and a fine
+    built-up sampler it only fills gaps in the street frontage where the imagery shows roofs."""
     rnd = random.Random(2027)
+    infill = occ0 is not None
     seg_grid = {}
     SC = 20.0
     for ri, rd in enumerate(roads):
@@ -282,7 +351,7 @@ def place_buildings(roads, sample_density, venues):
                 return False
         return True
 
-    occ = set()
+    occ = set(occ0) if occ0 else set()
     OC = 2.0
 
     def occ_cells(corners):
@@ -327,7 +396,10 @@ def place_buildings(roads, sample_density, venues):
                         continue
                     depth = rnd.uniform(9, 16) if dens > 0.45 else rnd.uniform(8, 13)
                     setback = (1.5 if major else 1.0) + (rnd.uniform(0, 2) if dens < 0.4 else rnd.uniform(0, 0.6))
-                    rows = 2 if dens > 0.55 and rnd.random() < 0.7 else 1
+                    rows = (2 if dens > 0.6 and rnd.random() < 0.5 else 1) if infill else (2 if dens > 0.55 and rnd.random() < 0.7 else 1)
+                    if infill and dens < 0.4:
+                        t += front + rnd.uniform(2, 8)
+                        continue
                     off = hw + setback
                     for row in range(rows):
                         cx = mx + ux * front / 2 + nx * side * (off + depth / 2)
@@ -335,6 +407,8 @@ def place_buildings(roads, sample_density, venues):
                         if near_venue(cx, cz):
                             break
                         if sample_density(cx, cz) < 0.2:
+                            break
+                        if fine is not None and fine(cx, cz) < (0.33 if dens > 0.55 else 0.5):
                             break
                         if not road_clear(cx, cz, max(front, depth) * 0.5):
                             break
@@ -352,6 +426,71 @@ def place_buildings(roads, sample_density, venues):
                         depth = rnd.uniform(8, 14)
                     t += front + (rnd.uniform(0, 0.4) if dens > 0.5 else rnd.uniform(1, 6))
     return out, road_clear, occ, OC
+
+
+STREET_W = {  # handcart, motorbike, kiosk, person, bicycle, cow, charpai, haystack
+    "market": [20, 30, 6, 30, 8, 2, 4, 0],
+    "town": [7, 28, 4, 20, 15, 9, 10, 0],
+    "village": [1, 14, 0, 12, 18, 22, 18, 12],
+}
+
+
+def street_props(roads, sd, ridx, occ, OC, places, venues):
+    """Street life along the kerbs: dense in the bazaar, sparse in villages. Never on a road or
+    inside a building. Output rows: [type, x*10, z*10, angle*100, variant]."""
+    rnd = random.Random(424)
+    kx, kz = places["kichha"]
+    out = []
+    for rd in roads:
+        if rd["t"] in ("path", "track", "trunk_link", "primary_link", "service"):
+            continue
+        p, hw = rd["p"], rd["w"] / 2
+        for i in range(0, len(p) - 2, 2):
+            ax, az, bx, bz = p[i], p[i + 1], p[i + 2], p[i + 3]
+            L = math.hypot(bx - ax, bz - az)
+            if L < 2:
+                continue
+            ux, uz = (bx - ax) / L, (bz - az) / L
+            nx, nz = -uz, ux
+            road_ang = math.atan2(uz, ux)
+            for side in (-1, 1):
+                t = rnd.uniform(0, 6)
+                while t < L:
+                    mx, mz = ax + ux * t, az + uz * t
+                    dens = sd(mx + nx * side * (hw + 6), mz + nz * side * (hw + 6))
+                    dK = math.hypot(mx - kx, mz - kz)
+                    zone = "market" if dens > 0.42 and (dK < 1800 or (rd["t"] in ("trunk", "primary") and dens > 0.5)) else "town" if dens > 0.28 else "village"
+                    step = {"market": rnd.uniform(3, 7), "town": rnd.uniform(9, 24), "village": rnd.uniform(22, 60)}[zone]
+                    if zone == "village" and dens < 0.08:
+                        step *= 2.5  # open fields: very little
+                    off = hw + (rnd.uniform(0.7, 2.6) if zone == "market" else rnd.uniform(1.0, 4.5))
+                    x, z = mx + nx * side * off, mz + nz * side * off
+                    t += step
+                    if (int(x // OC), int(z // OC)) in occ:
+                        continue
+                    if any((x - vx) ** 2 + (z - vz) ** 2 < (vr + 12) ** 2 for vx, vz, vr in venues):
+                        continue
+                    e, _ = ridx.edge_dist(x, z, skip=("path", "track"))
+                    if e < 0.5 or ridx.in_median(x, z):
+                        continue
+                    if zone == "village" and dens < 0.15 and rnd.random() < 0.6:
+                        continue
+                    typ = rnd.choices(range(8), STREET_W[zone])[0]
+                    face = road_ang + (math.pi if side > 0 else 0)  # local +z toward the road
+                    if typ in (1, 4):
+                        ang = face + rnd.uniform(-0.35, 0.35)          # parked nose-in
+                    elif typ in (0, 2, 6):
+                        ang = road_ang + (0 if rnd.random() < 0.5 else math.pi) + rnd.uniform(-0.1, 0.1)
+                    else:
+                        ang = rnd.uniform(-math.pi, math.pi)
+                    out.append([typ, int(round(x * 10)), int(round(z * 10)), int(round(ang * 100)), rnd.randrange(8)])
+                    # people gather: an extra person or two next to carts and kiosks
+                    if typ in (0, 2) and rnd.random() < 0.6:
+                        for _ in range(rnd.randint(1, 2)):
+                            px, pz = x + rnd.uniform(-1.5, 1.5), z + rnd.uniform(-1.5, 1.5)
+                            if (int(px // OC), int(pz // OC)) not in occ and ridx.edge_dist(px, pz, skip=("path", "track"))[0] > 0.3:
+                                out.append([3, int(round(px * 10)), int(round(pz * 10)), int(round(rnd.uniform(-3.14, 3.14) * 100)), rnd.randrange(8)])
+    return out
 
 
 def place_trees(roads, sample_density, sample_green, road_clear, occ, OC, venues, extent):
@@ -401,6 +540,9 @@ def main():
     els = load_osm()
     roads, graph, nodepos, nodetype = build_roads(els)
     print(f"roads: {len(roads)}  graph nodes: {len(nodepos)}")
+    divided_carriageways(roads)
+    for r in roads:
+        r.pop("lanes", None)
 
     places = {k: to_local(*v) for k, v in PLACES.items()}
     routes = {}
@@ -423,7 +565,7 @@ def main():
     print(f"reception route {L:.0f} m (snap {da:.0f}/{db:.0f})")
 
     img, ox, oz, mpp = build_mosaic()
-    density, green, water = built_mask(img, road_raster(roads, img.shape[:2], ox, oz, mpp))
+    density, green, water, fine = built_mask(img, road_raster(roads, img.shape[:2], ox, oz, mpp))
     H, W = density.shape
     print(f"mosaic {W}x{H}  mpp={mpp:.2f}")
 
@@ -434,19 +576,53 @@ def main():
                 return float(arr[i, j])
             return 0.0
         return f
-    sd, sg = sampler(density), sampler(green)
+    sd, sg, sf = sampler(density), sampler(green), sampler(fine)
 
     # debug previews (not shipped)
     dbg = os.path.join(ROOT, "data", "debug"); os.makedirs(dbg, exist_ok=True)
     Image.fromarray((np.clip(density * 255 * 1.4, 0, 255)).astype(np.uint8)).save(os.path.join(dbg, "built_density.png"))
 
     venues = [(*places["home"], 45), (*places["baraat"], 70), (*places["reception"], 80)]
-    buildings, road_clear, occ, OC = place_buildings(roads, sd, venues)
-    print(f"buildings: {len(buildings)}")
+
+    # real footprints (home neighbours are kept; the home compound clears its own plot at runtime)
+    if not os.path.exists(FOOTPRINTS):
+        print("downloading building footprints (Overture Maps)...")
+        fp.fetch_overture(FOOTPRINTS, BBOX)
+    ridx = fp.RoadIndex(roads)
+    rings = fp.load_footprints(FOOTPRINTS, to_local, ridx, [(*places["baraat"], 70), (*places["reception"], 80)])
+    ts = fp.TileSampler(17, TILE_CACHE, TILE_URL, local_to_merc, R)
+    tiles = set()
+    for ring in rings:
+        for x, z in ring:
+            px, py = ts.px(x, z)
+            tiles.add((int(px // 256), int(py // 256)))
+    ts.prefetch(sorted(tiles))
+    rings.sort(key=lambda r: (int(ts.px(*r[0])[1] // 256), int(ts.px(*r[0])[0] // 256)))  # tile-coherent sampling
+    real = fp.classify(rings, ridx, sd, sf, places, ts)
+    OC = 2.0
+    occ0 = set()
+    for b in real:
+        occ0 |= fp.occ_cells(b[5], OC)
+
+    # procedural infill only where the street frontage has roofs but no traced footprint
+    filler, road_clear, occ, OC = place_buildings(roads, sd, venues, occ0=occ0, fine=sf)
+    rnd = random.Random(7)
+    kx, kz = places["kichha"]
+    infill = []
+    for (cx, cz, w, d, ang, floors, style, shop) in filler:
+        c = obb_corners(cx, cz, w, d, ang)
+        ring = [(round(c[1][0], 1), round(c[1][1], 1)), (round(c[0][0], 1), round(c[0][1], 1)),
+                (round(c[3][0], 1), round(c[3][1], 1)), (round(c[2][0], 1), round(c[2][1], 1))]
+        zone = "market" if math.hypot(cx - kx, cz - kz) < 1700 and sd(cx, cz) > 0.4 else "town"
+        infill.append((fp.SHOP if shop else fp.HOUSE, floors, fp.roof_colour(ts, ring), rnd.choices(range(16), fp.PAINT_W[zone])[0], 0, ring))
+    buildings = [fp.encode(b) for b in real + infill]
+    print(f"buildings: {len(real)} real footprints + {len(infill)} infill")
     s, w, n, e = BBOX
     xa, za = to_local(n, w); xb, zb = to_local(s, e)
     trees = place_trees(roads, sd, sg, road_clear, occ, OC, venues, (xa, za, xb, zb))
     print(f"trees: {len(trees)}")
+    street = street_props(roads, sd, ridx, occ, OC, places, venues)
+    print(f"street props: {len(street)}")
 
     # small low-res land-cover map shipped for minimap tint / runtime decisions (derived, not imagery)
     small = Image.fromarray((np.clip(density, 0, 1) * 255).astype(np.uint8)).resize((W // 4, H // 4), Image.BILINEAR)
@@ -462,9 +638,10 @@ def main():
     json.dump(meta, open(os.path.join(OUT, "meta.json"), "w"), indent=1)
     json.dump(roads, open(os.path.join(OUT, "roads.json"), "w"), separators=(",", ":"))
     json.dump(routes, open(os.path.join(OUT, "routes.json"), "w"), separators=(",", ":"))
-    json.dump(buildings, open(os.path.join(OUT, "buildings.json"), "w"), separators=(",", ":"))
+    json.dump({"v": 2, "b": buildings}, open(os.path.join(OUT, "buildings.json"), "w"), separators=(",", ":"))
     json.dump(trees, open(os.path.join(OUT, "trees.json"), "w"), separators=(",", ":"))
-    for f in ("meta.json", "roads.json", "routes.json", "buildings.json", "trees.json", "built.png"):
+    json.dump(street, open(os.path.join(OUT, "street.json"), "w"), separators=(",", ":"))
+    for f in ("meta.json", "roads.json", "routes.json", "buildings.json", "trees.json", "street.json", "built.png"):
         print(f, os.path.getsize(os.path.join(OUT, f)) // 1024, "KB")
 
 

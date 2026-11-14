@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roadTextures } from './textures.js';
+import { roadTextures, medianTexture, stripeTexture } from './textures.js';
 
 const CLASS = {
   trunk: 'major', primary: 'major', secondary: 'major',
@@ -130,6 +130,34 @@ function ribbon(pts, hw, y, rep, out) {
   }
 }
 
+// Offset a polyline sideways by d along its left-hand normal (-dz, dx), with mitred joints.
+function offsetLine(pts, d) {
+  const n = pts.length / 2, out = [];
+  const seg = (a, b) => { const dx = pts[b * 2] - pts[a * 2], dz = pts[b * 2 + 1] - pts[a * 2 + 1]; const L = Math.hypot(dx, dz) || 1; return [-dz / L, dx / L]; };
+  for (let i = 0; i < n; i++) {
+    let nx = 0, nz = 0;
+    if (i > 0) { const [a, b] = seg(i - 1, i); nx += a; nz += b; }
+    if (i < n - 1) { const [a, b] = seg(i, i + 1); nx += a; nz += b; }
+    const L = Math.hypot(nx, nz) || 1; nx /= L; nz /= L;
+    let scale = 1;
+    if (i > 0 && i < n - 1) { const [a, b] = seg(i, i + 1); scale = Math.min(2.2, 1 / Math.max(0.3, nx * a + nz * b)); }
+    out.push(pts[i * 2] + nx * d * scale, pts[i * 2 + 1] + nz * d * scale);
+  }
+  return out;
+}
+
+// Vertical strip along a polyline (kerb faces), y0..y1, u along the length in metres / rep.
+function curtain(pts, y0, y1, rep, out) {
+  const n = pts.length / 2; if (n < 2) return;
+  const base = out.pos.length / 3; let dist = 0;
+  for (let i = 0; i < n; i++) {
+    if (i > 0) dist += Math.hypot(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]);
+    out.pos.push(pts[i * 2], y0, pts[i * 2 + 1], pts[i * 2], y1, pts[i * 2 + 1]);
+    out.uv.push(dist / rep, 0, dist / rep, 1);
+    if (i < n - 1) { const a = base + i * 2; out.idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+  }
+}
+
 function splitPolyline(p, maxLen) {
   const parts = [];
   let cur = [p[0], p[1]], len = 0;
@@ -152,6 +180,9 @@ export function buildRoadMeshes(net) {
   mats.street = mk('street', roadTextures.street());
   mats.dirt = mk('dirt', roadTextures.dirt());
   mats.shoulder = mk('shoulder', roadTextures.shoulder());
+  // divided highway (NH9): raised median with black-and-yellow painted kerbs
+  mats.median = new THREE.MeshLambertMaterial({ map: medianTexture() });
+  mats.kerb = new THREE.MeshLambertMaterial({ map: stripeTexture('#1b1b1b', '#e8c22a', 2), side: THREE.DoubleSide });
 
   const chunks = new Map(); // key -> {cls: {pos,uv,idx}}
   const get = (cx, cz, cls) => {
@@ -165,7 +196,12 @@ export function buildRoadMeshes(net) {
       const cx = Math.floor(part[mid] / CHUNK), cz = Math.floor(part[mid + 1] / CHUNK);
       const L = LAYER[r.cls];
       ribbon(part, r.w / 2, L.y, L.rep * (r.cls === 'street' ? 1 : 1), get(cx, cz, r.cls));
-      if (r.cls === 'major') ribbon(part, r.w / 2 + 3.5, LAYER.shoulder.y, LAYER.shoulder.rep, get(cx, cz, 'shoulder'));
+      if (r.m) {
+        const side = Math.sign(r.m), mw = Math.min(6, Math.abs(r.m) * 2) / 2; // our half of the median
+        ribbon(offsetLine(part, side * (r.w / 2 + mw / 2)), mw / 2 + 0.05, 0.24, 4, get(cx, cz, 'median'));
+        curtain(offsetLine(part, side * r.w / 2), 0.0, 0.25, 2, get(cx, cz, 'kerb'));
+        ribbon(offsetLine(part, -side * 1.75), r.w / 2 - 0.1, LAYER.shoulder.y, LAYER.shoulder.rep, get(cx, cz, 'shoulder')); // dusty verge on the outer side only
+      } else if (r.cls === 'major') ribbon(part, r.w / 2 + 3.5, LAYER.shoulder.y, LAYER.shoulder.rep, get(cx, cz, 'shoulder'));
       else if (r.cls === 'street' && r.w >= 7) ribbon(part, r.w / 2 + 2, LAYER.shoulder.y, LAYER.shoulder.rep, get(cx, cz, 'shoulder'));
     }
   }
@@ -183,7 +219,7 @@ export function buildRoadMeshes(net) {
       geo.setIndex(d.idx);
       geo.computeBoundingSphere();
       const m = new THREE.Mesh(geo, mats[cls]);
-      m.renderOrder = LAYER[cls].order;
+      m.renderOrder = LAYER[cls]?.order ?? 0;
       m.receiveShadow = true;
       g.add(m);
     }

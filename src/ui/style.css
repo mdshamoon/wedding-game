@@ -147,6 +147,48 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0a2e21; col
 .touch .tbtn { pointer-events: auto; width: 66px; height: 66px; border-radius: 50%; background: rgba(10,46,33,.4); border: 1px solid #d4af3799; color: var(--ivory); font-family: var(--display); font-size: 10px; letter-spacing: .1em; display: flex; align-items: center; justify-content: center; text-transform: uppercase; text-align: center; }
 .touch .tbtn.pressed { background: #d4af3799; color: #3a2a12; }
 
+/* phone driving: steering slider (left thumb), pedals + aux buttons (right thumb) */
+.drive-ctl { position: absolute; inset: 0; pointer-events: none; }
+.drive-ctl .steer-zone { position: absolute; left: 0; bottom: 0; width: 48%; height: 58%; pointer-events: auto; touch-action: none; }
+.drive-ctl .steer-track { position: absolute; left: 120px; top: calc(100% - 92px - var(--safe-b)); width: 200px; height: 54px; margin: -27px 0 0 -100px; border-radius: 999px;
+  background: linear-gradient(90deg, rgba(10,46,33,.55), rgba(10,46,33,.25) 40%, rgba(10,46,33,.25) 60%, rgba(10,46,33,.55)); border: 1px solid #d4af3788; box-shadow: inset 0 0 0 4px rgba(10,46,33,.25); transition: opacity .2s; opacity: .55; }
+.drive-ctl .steer-track::before, .drive-ctl .steer-track::after { content: '◀'; position: absolute; top: 50%; left: 14px; transform: translateY(-50%); color: var(--gold-soft); font-size: 14px; opacity: .8; }
+.drive-ctl .steer-track::after { content: '▶'; left: auto; right: 14px; }
+.drive-ctl .steer-knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px; border-radius: 50%; background: var(--seal-grad); box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.drive-ctl .steer-zone.active .steer-track { opacity: 1; }
+.drive-ctl .steer-zone.tilt-on .steer-track { opacity: .3; }
+.drive-ctl .steer-hint { position: absolute; left: 20px; bottom: calc(150px + var(--safe-b)); font-family: var(--display); font-size: 10px; letter-spacing: .16em; color: rgba(247,240,225,.75); text-shadow: 0 1px 4px #000; transition: opacity .4s; white-space: nowrap; }
+.drive-ctl .pedals { position: absolute; right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(14px + var(--safe-b)); display: flex; align-items: flex-end; gap: 12px; pointer-events: auto; touch-action: none; padding: 10px 6px 4px 18px; }
+.drive-ctl .pedal { display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 18px; font-family: var(--display); letter-spacing: .12em; color: var(--ivory);
+  border: 1px solid #d4af37aa; box-shadow: 0 6px 18px rgba(0,0,0,.35), inset 0 -6px 0 rgba(0,0,0,.18); transition: transform .06s, background .06s; }
+.drive-ctl .pedal span { font-size: 13px; }
+.drive-ctl .pedal small { font-family: var(--serif); letter-spacing: 0; font-size: 11px; opacity: .75; margin-top: 4px; }
+.drive-ctl .pedal.gas { width: 86px; height: 132px; background: linear-gradient(180deg, rgba(25,120,80,.75), rgba(10,70,45,.8)); }
+.drive-ctl .pedal.brake { width: 86px; height: 96px; background: linear-gradient(180deg, rgba(150,40,40,.7), rgba(95,20,20,.8)); }
+.drive-ctl .pedal.pressed { transform: scale(.94) translateY(3px); box-shadow: 0 2px 8px rgba(0,0,0,.3), inset 0 -2px 0 rgba(0,0,0,.18); }
+.drive-ctl .pedal.gas.pressed { background: linear-gradient(180deg, #35c08a, #1d8a5d); }
+.drive-ctl .pedal.brake.pressed { background: linear-gradient(180deg, #e0574f, #a8302a); }
+.drive-ctl .aux { position: absolute; right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(168px + var(--safe-b)); display: flex; gap: 10px; pointer-events: none; }
+.drive-ctl .dbtn { pointer-events: auto; touch-action: none; width: 58px; height: 58px; border-radius: 50%; background: rgba(10,46,33,.5); border: 1px solid #d4af3799; color: var(--ivory);
+  font-family: var(--display); font-size: 10px; letter-spacing: .08em; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; line-height: 1.25; }
+.drive-ctl .dbtn.boost { background: rgba(120,80,10,.55); }
+.drive-ctl .dbtn.small { width: 48px; height: 48px; font-size: 9px; align-self: flex-end; }
+.drive-ctl .dbtn b { font-weight: 600; color: var(--gold-soft); }
+.drive-ctl .dbtn.pressed { background: #d4af37cc; color: #3a2a12; }
+.drive-ctl .dbtn.pressed b { color: #3a2a12; }
+/* keep the speedometer clear of the pedals on phones */
+body.touch-ui .hud .speedo { right: auto; left: 50%; transform: translateX(-50%); bottom: calc(10px + var(--safe-b)); text-align: center; }
+body.touch-ui .hud .hint { bottom: calc(66px + var(--safe-b)); }
+@media (orientation: portrait) {
+  .drive-ctl .steer-zone { width: 56%; height: 46%; }
+  .drive-ctl .steer-track { width: 170px; margin-left: -85px; }
+  .drive-ctl .pedal.gas { width: 74px; height: 118px; }
+  .drive-ctl .pedal.brake { width: 74px; height: 86px; }
+  .drive-ctl .aux { bottom: calc(158px + var(--safe-b)); flex-direction: column-reverse; align-items: flex-end; gap: 10px; }
+  .drive-ctl .dbtn.small { align-self: flex-end; }
+  body.touch-ui .hud .speedo { bottom: calc(150px + var(--safe-b)); }
+}
+
 .menu-btn { position: fixed; left: 12px; bottom: calc(12px + var(--safe-b)); z-index: 25; width: 38px; height: 38px; border-radius: 50%; border: 1px solid #d4af3799; background: var(--glass); color: var(--ivory); font-size: 16px; cursor: pointer; display: none; }
 .menu-btn.on { display: block; }
 .skip-btn { position: fixed; right: 14px; top: calc(14px + env(safe-area-inset-top, 0px)); z-index: 32; }
@@ -166,6 +208,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0a2e21; col
 
 @media (max-width: 600px) {
   .hud .minimap { width: 118px; height: 118px; }
+  .hud .objective { left: 12px; transform: none; max-width: calc(100% - 150px); font-size: 15px; padding: 6px 14px; white-space: normal; line-height: 1.2; border-radius: 14px; }
+  .hud .dist { left: 18px !important; transform: none !important; top: calc(80px + env(safe-area-inset-top, 0px)); }
   .hud .speedo .v { font-size: 34px; }
   .dialogue .avatar { width: 66px; height: 82px; }
   .dialogue .box { min-height: 82px; }
@@ -192,3 +236,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0a2e21; col
 .hud .minimap { pointer-events: auto; cursor: pointer; }
 .hud .map-btn { position: absolute; right: 14px; top: calc(192px + env(safe-area-inset-top, 0px)); pointer-events: auto; font-family: var(--display); font-size: 10px; letter-spacing: .18em; padding: 6px 12px; border-radius: 999px; border: 1px solid #d4af3799; background: var(--glass); color: var(--ivory); cursor: pointer; }
 @media (max-width: 600px) { .hud .map-btn { top: calc(140px + env(safe-area-inset-top, 0px)); } .fm-legend { font-size: 13px; gap: 8px; } }
+/* short landscape phones: smaller minimap, MAP beside it, controls tucked under */
+@media (max-height: 500px) and (orientation: landscape) {
+  .hud .minimap { width: 104px; height: 104px; right: calc(12px + env(safe-area-inset-right, 0px)); top: 10px; }
+  .hud .map-btn { top: 44px; right: calc(124px + env(safe-area-inset-right, 0px)); }
+  .hud .objective { font-size: 15px; padding: 5px 16px; top: 8px; }
+  .hud .dist { top: 40px; }
+  .drive-ctl .pedal.gas { width: 80px; height: 116px; }
+  .drive-ctl .pedal.brake { width: 80px; height: 84px; }
+  .drive-ctl .aux { bottom: calc(146px + var(--safe-b)); }
+  .drive-ctl .dbtn { width: 52px; height: 52px; }
+  .drive-ctl .dbtn.small { width: 44px; height: 44px; }
+  .drive-ctl .steer-track { top: calc(100% - 70px - var(--safe-b)); left: calc(130px + env(safe-area-inset-left, 0px)); }
+  .drive-ctl .steer-hint { bottom: calc(112px + var(--safe-b)); left: calc(24px + env(safe-area-inset-left, 0px)); }
+  .drive-ctl .steer-zone { height: 70%; }
+}

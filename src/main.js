@@ -3,7 +3,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { CONFIG, QUALITY } from './config.js';
 import { World } from './world/World.js';
 import { CameraRig } from './core/camera.js';
-import { input, setupTouch, setTouchButtons } from './core/input.js';
+import { input, setupTouch, setTouchButtons, setDriveControls } from './core/input.js';
 import { HUD } from './ui/hud.js';
 import { Story, setStoryAudio } from './story/Story.js';
 import { loadAudio, loadCharacters } from './core/optional.js';
@@ -50,7 +50,7 @@ const game = {
   updaters: new Set(),
   album: [],
   paused: false,
-  setTouchButtons,
+  setTouchButtons, setDriveControls,
   onUpdate(fn) { this.updaters.add(fn); return () => this.updaters.delete(fn); },
   _snapReq: null,
   snapshot(caption) { return new Promise((r) => { this._snapReq = { caption, r }; }); },
@@ -70,6 +70,17 @@ window.__step = (n = 60, dt = 1 / 60) => {
   }
   renderer.render(scene, camera);
   return game.time;
+};
+
+// Debug: park a static camera `back` metres behind (x,z) looking along `ang`, then let the world stream.
+window.__look = async (x, z, h = 22, back = 40, ang = 0, lookH = 2, waitMs = 6000) => {
+  document.getElementById('boot').style.display = 'none'; ui.style.display = 'none';
+  game.rig.mode = 'static'; game.focus.set(x, 0, z);
+  const cx = x - Math.sin(ang) * back, cz = z - Math.cos(ang) * back;
+  camera.position.set(cx, h, cz); game.rig.look.set(x + Math.sin(ang) * 10, lookH, z + Math.cos(ang) * 10); camera.lookAt(game.rig.look);
+  const t0 = performance.now();
+  while (performance.now() - t0 < waitMs) { window.__step(10); await new Promise((r) => setTimeout(r, 300)); }
+  window.__step(1);
 };
 
 // ---------------------------------------------------------------- loop

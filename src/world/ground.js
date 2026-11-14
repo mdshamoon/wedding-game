@@ -182,5 +182,6 @@ export class SatelliteGround {
       if (!pending) break;
       await new Promise((r) => setTimeout(r, 100));
     }
+    this.lastUpdate = -1e9; // let the per-frame streaming carry on from game time
   }
 }

@@ -95,6 +95,10 @@ function mithaiStall(game, at) {
   if (q) { nx = -q.dirz; nz = q.dirx; hw = q.road.w / 2; }
   g.position.set(at.x + nx * (hw + 3.2), 0, at.z + nz * (hw + 3.2));
   g.rotation.y = Math.atan2(-nx, -nz); // face the road
+  { // keep any real building off the stall's spot
+    const sx = g.position.x, sz = g.position.z, tx = -nz, tz = nx;
+    world.buildings.exclude([[sx + tx * 3 - nx * 1.5, sz + tz * 3 - nz * 1.5], [sx - tx * 3 - nx * 1.5, sz - tz * 3 - nz * 1.5], [sx - tx * 3 + nx * 3, sz - tz * 3 + nz * 3], [sx + tx * 3 + nx * 3, sz + tz * 3 + nz * 3]]);
+  }
   const M = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, ...o });
   const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
   add(new THREE.BoxGeometry(3.6, 0.9, 1.0), M(0x7a4a2a), 0, 0.45, 0.6);

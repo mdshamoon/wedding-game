@@ -68,7 +68,7 @@ export async function runDrive(game, opts) {
   const start = opts.start || route[0];
   const aim = route[Math.min(route.length - 1, 3)];
   car.place(start.x, start.z, Math.atan2(aim.x - start.x, aim.z - start.z));
-  car.onCrash = () => { audio.sfx('crash', { volume: 0.6 }); rig.shake = 0.6; };
+  car.onCrash = () => { audio.sfx('crash', { volume: 0.6 }); rig.shake = 0.6; game.input.vibrate(70); };
   const night = opts.time === 'night' || opts.time === 'evening' || opts.time === 'dusk';
   car.enableHeadlights(game.scene, night);
   // groom (and maybe bride) visible through the windscreen
@@ -116,8 +116,9 @@ export async function runDrive(game, opts) {
   const nextObjective = () => { const s = stops.find((x) => !x.done); hud.objective(s ? 'Stop' : 'Go', s ? s.objective : opts.objective); };
   nextObjective();
   if (opts.ff) hud.hint(opts.ffHint || 'Hold F to fast-forward');
-  else hud.hint(game.input.isTouch ? '' : 'W A S D / arrows to drive · Space brake · H horn');
-  game.setTouchButtons([{ name: 'brake', label: 'Brake' }, { name: 'horn', label: 'Horn' }, ...(opts.ff ? [{ name: 'ff', label: '⏩' }] : [])]);
+  else hud.hint(game.input.isTouch ? (innerHeight > innerWidth ? 'Tip: turn your phone sideways for a wider view' : '') : 'W A S D / arrows to drive · Space brake · Shift boost · H horn');
+  if (game.input.isTouch && !opts.ff && innerHeight > innerWidth) setTimeout(() => hud.hint(''), 6000);
+  game.setDriveControls({ ff: !!opts.ff });
   audio.playMusic(opts.music || 'drive');
   audio.setAmbience(night ? 'night' : 'town');
   audio.engine.start();
@@ -128,6 +129,19 @@ export async function runDrive(game, opts) {
 
   let busy = false;
   const ffState = {};
+  // Touch steering is coarse: when the thumb is off the slider (and tilt is level), gently line the
+  // car up with the road it is on, so it tracks narrow lanes instead of drifting into walls.
+  const steerWithAssist = () => {
+    const sx = input.axisX();
+    if (!input.isTouch || input.touchSteering() || Math.abs(sx) > 0.05) return sx;
+    const q = car.road;
+    if (!q || car.offroad || Math.abs(car.speed) < 3 || q.road.cls === 'dirt') return sx;
+    let h = Math.atan2(q.dirx, q.dirz);
+    let d = h - car.heading; d = Math.atan2(Math.sin(d), Math.cos(d));
+    if (Math.abs(d) > Math.PI / 2) { h += Math.PI; d = Math.atan2(Math.sin(h - car.heading), Math.cos(h - car.heading)); }
+    if (Math.abs(d) > 0.6) return sx; // at a junction / turning: leave it to the player
+    return Math.max(-0.4, Math.min(0.4, -d * 1.6 * Math.sign(car.speed)));
+  };
   return new Promise((resolve) => {
     const off = game.onUpdate(async (dt, t) => {
       destB.userData.tick(t); stopBeacons.forEach((b) => b.userData.tick(t));
@@ -138,7 +152,7 @@ export async function runDrive(game, opts) {
         for (let k = 0; k < 4; k++) car.autopilot(dt, tracker.pts.slice(tracker.update(car.pos).i), 40, ffState);
       } else {
         ffState.i = 0;
-        car.drive(dt, input.axisY(), input.axisX(), input.held('brake'), input.held('boost'));
+        car.drive(dt, input.axisY(), steerWithAssist(), input.held('brake'), input.held('boost'));
       }
       if (input.pressed('horn')) audio.horn();
       updateConvoy(dt);

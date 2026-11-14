@@ -33,7 +33,7 @@ Open http://localhost:5173. Useful URL flags:
 - **Map:** M (or tap the minimap / MAP button) opens the full map: drag to pan, scroll or pinch to zoom, switch between Satellite and Map views
 - **Garage:** choose Luxury SUV (130–180 km/h), Executive Sedan (137–187 km/h) or Sports Coupe (151–209 km/h), and the paint, before the first drive
 - **Dialogue:** click or tap the box, or press Space/Enter
-- **Phones:** on-screen joystick and buttons appear automatically
+- **Phones:** while driving, slide your left thumb anywhere on the left side to steer (the slider appears where you touch). Hold GAS or BRAKE with your right thumb, and slide between them without lifting. Holding BRAKE when stopped reverses. HORN and BOOST sit above the pedals, and TILT turns on steering by tilting the phone (tap again to re-centre). With no thumb on the slider, a light assist keeps the car lined up with the road. Landscape is best. Add `?touch` to the URL to try these controls on a laptop.
 
 ## Changing the story
 - All dialogue, names and jokes are in `src/story/script.js`
@@ -41,9 +41,13 @@ Open http://localhost:5173. Useful URL flags:
 - Dialogue avatars are drawn in code (`src/story/avatars.js`). No photos are used anywhere.
 
 ## How the real map works
-`tools/build_data.py` takes OpenStreetMap roads around the three pins (Home, Blessing Garden, Grand Heritage). It routes the three journeys on the real road graph, then reads satellite imagery to find built-up areas, so the generated houses and shops sit where the real town is. The output goes to `public/data/`. At runtime the ground streams real satellite imagery tiles under your wheels.
+`tools/build_data.py` builds everything in `public/data/` from real data around the three pins (Home, Blessing Garden, Grand Heritage):
+- **Roads** come from OpenStreetMap. The three journeys are routed on the real road graph. Divided highways such as NH9 at Darau are detected (two one-way carriageways side by side) and drawn with their real width and a planted median with painted kerbs.
+- **Buildings** are the real footprints from [Overture Maps](https://overturemaps.org), which merges Google Open Buildings, Microsoft's ML footprints and OSM, all traced from satellite imagery. About 41,000 houses and shops stand where they really are. Each roof is tinted with the colour sampled from the satellite photo of that roof. Floors are estimated from the neighbourhood (bazaar, town or village), and shopfronts face the street. Gaps in the bazaar frontage where the imagery shows roofs but no outline was traced are filled with row buildings.
+- **Street life** (handcarts, parked bikes, kiosks, people, cows, charpais, haystacks) is scattered along the kerbs: dense in Kichha bazaar, sparse in the villages.
+- At runtime the ground streams real satellite imagery tiles under your wheels, and buildings are built in 400 m chunks around you.
 
-To rebuild the data (needs [uv](https://docs.astral.sh/uv/)):
+To rebuild the data (needs [uv](https://docs.astral.sh/uv/); the first run downloads the footprints and roof-colour tiles):
 
 ```bash
 npm run data
@@ -55,5 +59,6 @@ Every push to `main` builds the game and publishes it to https://mdshamoon.githu
 
 ## Credits
 - Roads: © OpenStreetMap contributors (ODbL)
+- Building footprints: Overture Maps Foundation (ODbL), including Google Open Buildings (CC BY 4.0) and Microsoft Global ML Building Footprints (ODbL)
 - Satellite imagery: © Esri, Maxar, Earthstar Geographics (used for a personal, non-commercial project; the source can be changed in `src/config.js`)
 - All 3D models, textures, music and sound are generated in code
