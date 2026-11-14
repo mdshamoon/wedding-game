@@ -246,6 +246,7 @@ class AudioSystem {
   unlock() {
     try {
       if (typeof window === 'undefined') return
+      this._iosPlayback()
       if (!this.ac) {
         const AC = window.AudioContext || window.webkitAudioContext
         if (!AC) return
@@ -334,6 +335,29 @@ class AudioSystem {
 
   // ---- internals ---------------------------------------------------------------
   _warn(e) { warn(e) }
+  // iPhones mute Web Audio when the ring/silent switch is on. Ask for the "playback" audio session
+  // (Safari 17+); on older iOS, a silent looping <audio> element started in the tap does the same.
+  _iosPlayback() {
+    try {
+      if (navigator.audioSession && navigator.audioSession.type !== 'playback') { navigator.audioSession.type = 'playback'; return }
+      if (navigator.audioSession) return
+      const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      if (!ios) return
+      if (!this._silentEl) {
+        const sr = 8000, n = sr / 2, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf)
+        const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)) }
+        w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true)
+        v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true)
+        const el = document.createElement('audio')
+        el.src = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }))
+        el.loop = true; el.playsInline = true; el.setAttribute('playsinline', ''); el.setAttribute('x-webkit-airplay', 'deny'); el.disableRemotePlayback = true
+        this._silentEl = el
+        document.addEventListener('visibilitychange', () => { try { if (document.hidden) el.pause() } catch (e) { /* ignore */ } })
+      }
+      if (this._silentEl.paused && !document.hidden) { const p = this._silentEl.play(); if (p && p.catch) p.catch(() => {}) }
+    } catch (e) { /* not supported */ }
+  }
+
   _hasWebAudio() { return typeof window !== 'undefined' && !!(window.AudioContext || window.webkitAudioContext) }
   _ready() { return !!(this.ac && this._graph && this.S && this._unlocked && this.ac.state === 'running') }
   _comp() { return this._latency + this._offset }
@@ -403,13 +427,14 @@ class AudioSystem {
     // iOS can interrupt the context (calls, app switch): resume on the next gesture
     const regain = () => {
       try {
+        if (this._unlocked && !document.hidden) this._iosPlayback()
         if (this.ac && this._unlocked && this.ac.state !== 'running' && !document.hidden) {
           const p = this.ac.resume()
           if (p && p.then) p.then(() => this._onState(), () => {})
         }
       } catch (e) { /* ignore */ }
     }
-    for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, regain, { capture: true, passive: true })
+    for (const ev of ['pointerdown', 'pointerup', 'keydown', 'touchend', 'click']) window.addEventListener(ev, regain, { capture: true, passive: true })
   }
 
   _onState() {

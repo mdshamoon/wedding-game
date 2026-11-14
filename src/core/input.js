@@ -50,7 +50,7 @@ export const input = {
   },
   // true while the player is actively steering by touch / tilt (used to switch the steering assist off)
   touchSteering() { return driveState.active && (driveState.slider !== 0 || (driveState.tilt && Math.abs(driveState.tiltValue) > 0.08)); },
-  vibrate(ms = 40) { if (this.isTouch) try { navigator.vibrate?.(ms); } catch (e) { /* unsupported */ } },
+  vibrate(ms = 40) { if (this.isTouch && navigator.userActivation?.hasBeenActive !== false) try { navigator.vibrate?.(ms); } catch (e) { /* unsupported */ } },
   held(name) {
     return (KEYMAP[name] || []).some((k) => keys.has(k)) || touchState.buttons.has(name);
   },
@@ -68,9 +68,28 @@ export const input = {
 const touchEdge = new Set();
 let touchRoot = null;
 
+// Safari ignores user-scalable=no: two thumbs on the controls read as a pinch, and a quick double tap
+// zooms. Block both, but keep normal taps/clicks and one-finger scrolling inside panels working.
+function preventPageZoom() {
+  const block = (e) => e.preventDefault();
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, block, { passive: false });
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1 || !e.target.closest?.('.panel, .chapter-list, .album, .scroll')) e.preventDefault();
+  }, { passive: false });
+  let lastEnd = 0;
+  document.addEventListener('touchend', (e) => {
+    const now = e.timeStamp;
+    // a second tap within 350 ms on the game (not on a button / dialogue) would be a double-tap zoom
+    if (now - lastEnd < 350 && !e.target.closest?.('button, .btn, .opt, .dialogue, .panel, a, input, .title-screen')) e.preventDefault();
+    lastEnd = now;
+  }, { passive: false });
+  document.addEventListener('dblclick', block, { passive: false });
+}
+
 export function setupTouch(uiRoot) {
   if (!input.isTouch) return;
   document.body.classList.add('touch-ui');
+  preventPageZoom();
   touchRoot = document.createElement('div');
   touchRoot.className = 'touch';
   touchRoot.innerHTML = `

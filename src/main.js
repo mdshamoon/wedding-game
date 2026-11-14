@@ -198,6 +198,9 @@ async function boot() {
   progress(0.05);
   game.audio = await loadAudio();
   setStoryAudio(game.audio);
+  // Any tap or key starts the sound (Safari only allows it inside a user gesture: touchend/click/keydown).
+  const wakeAudio = () => { if (game.audio.state !== 'running') game.audio.unlock(); };
+  for (const ev of ['touchend', 'click', 'keydown']) addEventListener(ev, wakeAudio, { capture: true, passive: true });
   await loadCharacters();
   progress(0.15);
   await game.world.load((v) => progress(0.15 + v * 0.75));
