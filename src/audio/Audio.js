@@ -256,10 +256,7 @@ class AudioSystem {
         this._installListeners()
       }
       this._unlocked = true
-      if (this.ac.state !== 'running' && this.ac.resume) {
-        const p = this.ac.resume()
-        if (p && p.then) p.then(() => this._onState(), () => {})
-      }
+      if (this.ac.state !== 'running' || this._stuck) this._wake(true)
       if (!this._primed) {
         // iOS: a sound started inside the gesture unlocks output
         const b = this.ac.createBuffer(1, 1, 22050), s = this.ac.createBufferSource()
@@ -408,33 +405,61 @@ class AudioSystem {
 
   _installListeners() {
     if (typeof document === 'undefined') return
-    document.addEventListener('visibilitychange', () => {
+    const onHide = () => {
+      clearTimeout(this._visTimer)
+      // silence at once (a "playback" session could keep sounding in the background), suspend shortly after
+      try { if (this.out) this.out.gain.setTargetAtTime(0, this.ac.currentTime, 0.02) } catch (e) { /* ignore */ }
+      this._visTimer = setTimeout(() => {
+        try { if (document.hidden && this.ac.state === 'running') { const p = this.ac.suspend(); if (p && p.catch) p.catch(() => {}) } } catch (e) { /* ignore */ }
+      }, 400)
+    }
+    const onShow = () => {
+      clearTimeout(this._visTimer)
+      if (!this._unlocked) return
+      this._applyVolume()
+      this._wake(false)
+    }
+    document.addEventListener('visibilitychange', () => { try { if (this.ac) (document.hidden ? onHide : onShow)() } catch (e) { warn(e) } })
+    window.addEventListener('pageshow', () => { try { if (this.ac && !document.hidden) onShow() } catch (e) { /* ignore */ } })
+    window.addEventListener('focus', () => { try { if (this.ac && this._unlocked && !document.hidden) this._wake(false) } catch (e) { /* ignore */ } })
+    // Safari only lets audio restart inside a gesture: every tap retries if the sound is not flowing
+    const regain = () => { try { if (this._unlocked && !document.hidden) this._wake(true) } catch (e) { /* ignore */ } }
+    for (const ev of ['pointerup', 'keydown', 'touchend', 'click']) window.addEventListener(ev, regain, { capture: true, passive: true })
+  }
+
+  // Bring the context back after a tab switch, app switch or phone call.
+  _wake(gesture) {
+    const ac = this.ac
+    if (!ac) return
+    this._iosPlayback()
+    const resume = () => {
       try {
-        if (!this.ac) return
-        clearTimeout(this._visTimer)
-        if (document.hidden) {
-          // debounce: only suspend if the page stays hidden (saves CPU/battery in background tabs)
-          this._visTimer = setTimeout(() => {
-            try { if (document.hidden && this.ac.state === 'running') { this._autoSuspended = true; const p = this.ac.suspend(); if (p && p.catch) p.catch(() => {}) } } catch (e) { /* ignore */ }
-          }, 400)
-        } else if (this._autoSuspended && this._unlocked) {
-          this._autoSuspended = false
-          const p = this.ac.resume()
-          if (p && p.then) p.then(() => this._onState(), () => {})
-        }
-      } catch (e) { warn(e) }
-    })
-    // iOS can interrupt the context (calls, app switch): resume on the next gesture
-    const regain = () => {
-      try {
-        if (this._unlocked && !document.hidden) this._iosPlayback()
-        if (this.ac && this._unlocked && this.ac.state !== 'running' && !document.hidden) {
-          const p = this.ac.resume()
-          if (p && p.then) p.then(() => this._onState(), () => {})
-        }
+        const p = ac.resume()
+        if (p && p.then) p.then(() => { this._applyVolume(); this._onState(); this._checkFlowing() }, () => {})
       } catch (e) { /* ignore */ }
     }
-    for (const ev of ['pointerdown', 'pointerup', 'keydown', 'touchend', 'click']) window.addEventListener(ev, regain, { capture: true, passive: true })
+    if (ac.state === 'interrupted' || (gesture && this._stuck)) {
+      // WebKit sometimes only recovers from an interruption with a full suspend -> resume cycle
+      this._stuck = false
+      try { const p = ac.suspend(); if (p && p.then) p.then(resume, resume); else resume() } catch (e) { resume() }
+    } else if (ac.state !== 'running') resume()
+    else if (!gesture) this._checkFlowing()
+  }
+
+  // "running" but the clock is not moving = a silent WebKit context: repair it on the next tap.
+  _checkFlowing() {
+    const ac = this.ac
+    if (!ac) return
+    const t0 = ac.currentTime
+    clearTimeout(this._flowTimer)
+    this._flowTimer = setTimeout(() => {
+      try { this._stuck = !document.hidden && ac.state === 'running' && ac.currentTime - t0 < 0.15 } catch (e) { /* ignore */ }
+    }, 600)
+  }
+
+  /** true when sound was on but the browser stopped it and only a tap can restart it */
+  get needsTap() {
+    try { return !!(this.ac && this._unlocked && !document.hidden && (this.ac.state !== 'running' || this._stuck)) } catch (e) { return false }
   }
 
   _onState() {

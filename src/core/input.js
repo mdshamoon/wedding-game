@@ -74,7 +74,7 @@ function preventPageZoom() {
   const block = (e) => e.preventDefault();
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, block, { passive: false });
   document.addEventListener('touchmove', (e) => {
-    if (e.touches.length > 1 || !e.target.closest?.('.panel, .chapter-list, .album, .scroll')) e.preventDefault();
+    if (e.touches.length > 1 || e.target.tagName === 'CANVAS' || !e.target.closest?.('.panel, .chapter-list, .album, .scroll')) e.preventDefault();
   }, { passive: false });
   let lastEnd = 0;
   document.addEventListener('touchend', (e) => {

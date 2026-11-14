@@ -34,6 +34,7 @@ html { position: fixed; inset: 0; }
 /* buttons and dialogue: instant taps, no double-tap zoom; panels can still scroll with one finger */
 button, .btn, .opt, .dialogue, .tbtn, .dbtn { touch-action: manipulation; }
 .panel, .chapter-list { touch-action: pan-y; }
+.panel canvas, .panel .qte { touch-action: none; } /* signature pad etc. draw instead of scrolling */
 #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #ui { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
 #ui > *:not(.hud):not(.passthrough):not(.dialogue):not(.touch) { pointer-events: auto; }
@@ -256,3 +257,12 @@ body.touch-ui .hud .hint { bottom: calc(66px + var(--safe-b)); }
   .drive-ctl .steer-hint { bottom: calc(112px + var(--safe-b)); left: calc(24px + env(safe-area-inset-left, 0px)); }
   .drive-ctl .steer-zone { height: 70%; }
 }
+
+/* "tap to turn the sound back on" (Safari stops audio after a tab/app switch) */
+.sound-btn { position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -12px); z-index: 45; opacity: 0; pointer-events: none !important;
+  display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 999px; border: 1px solid #d4af37cc; background: var(--glass); color: var(--ivory);
+  font-family: var(--display); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; box-shadow: 0 8px 24px rgba(0,0,0,.4); transition: opacity .25s, transform .25s; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.sound-btn span { font-size: 16px; letter-spacing: 0; }
+.sound-btn.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto !important; animation: soundPulse 1.8s infinite; }
+@keyframes soundPulse { 0%,100% { box-shadow: 0 8px 24px rgba(0,0,0,.4), 0 0 0 0 #d4af3766; } 50% { box-shadow: 0 8px 24px rgba(0,0,0,.4), 0 0 0 8px #d4af3700; } }
+@media (max-width: 600px) { .sound-btn { top: calc(112px + env(safe-area-inset-top, 0px)); } }

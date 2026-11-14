@@ -35,13 +35,20 @@ function sehraQTE(game, onStep) {
   return story.panel((el, close) => {
     let i = 0, timer = null, misses = 0;
     el.classList.add('bottom');
-    el.innerHTML = `<h3>Sehra Bandi</h3><h2>Tie the Sehra</h2><p>Press the arrows as Mamu Jaan ties each strand</p>
-      <div class="qte" style="display:flex;gap:10px;justify-content:center;margin:10px 0 6px"></div>
-      <div class="row qbtns" style="margin-top:10px"></div><p class="qmsg" style="min-height:1.4em;margin:8px 0 0"></p>`;
+    const touch = game.input.isTouch;
+    el.innerHTML = `<h3>Sehra Bandi</h3><h2>Tie the Sehra</h2><p>${touch ? 'Tap the matching arrow below' : 'Press the arrows'} as Mamu Jaan ties each strand</p>
+      <div class="qte" style="display:flex;gap:8px;justify-content:center;margin:10px 0 6px;pointer-events:none"></div>
+      <div class="row qbtns" style="margin-top:12px;gap:12px"></div><p class="qmsg" style="min-height:1.4em;margin:8px 0 0"></p>`;
     const box = el.querySelector('.qte'), msg = el.querySelector('.qmsg');
-    seq.forEach(([, sym]) => { const d = document.createElement('div'); d.textContent = sym; d.style.cssText = 'width:52px;height:52px;border-radius:50%;border:1px solid #b8912b;display:flex;align-items:center;justify-content:center;font-size:26px;color:#9a7620;background:#fffcf5'; box.appendChild(d); });
+    seq.forEach(([, sym]) => { const d = document.createElement('div'); d.textContent = sym; d.style.cssText = 'width:40px;height:40px;border-radius:50%;border:1px solid #b8912b;display:flex;align-items:center;justify-content:center;font-size:20px;color:#9a7620;background:#fffcf5'; box.appendChild(d); });
     const btns = el.querySelector('.qbtns');
-    keys.forEach(([code, sym]) => { const b = document.createElement('button'); b.className = 'opt'; b.textContent = sym; b.style.fontSize = '22px'; b.onclick = () => press(code); btns.appendChild(b); });
+    // react on touch-down (instant, and immune to Safari's double-tap handling when an arrow repeats)
+    keys.forEach(([code, sym]) => {
+      const b = document.createElement('button'); b.className = 'opt'; b.textContent = sym;
+      b.style.cssText = 'font-size:30px;width:66px;height:66px;padding:0;border-radius:18px;touch-action:manipulation;font-weight:600;color:#3a2a12;background:linear-gradient(180deg,#fffcf5,#f3e3b8);box-shadow:0 3px 0 #b8912b';
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); press(code); b.style.transform = 'translateY(2px) scale(.95)'; setTimeout(() => { b.style.transform = ''; }, 110); });
+      btns.appendChild(b);
+    });
     const mark = () => { [...box.children].forEach((d, k) => { d.style.background = k < i ? 'linear-gradient(135deg,#f6e5a8,#d4af37)' : k === i ? '#fff' : '#fffcf5'; d.style.transform = k === i ? 'scale(1.15)' : ''; d.style.boxShadow = k === i ? '0 0 0 3px #e9c97788' : ''; }); };
     mark();
     const press = (code) => {

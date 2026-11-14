@@ -201,6 +201,17 @@ async function boot() {
   // Any tap or key starts the sound (Safari only allows it inside a user gesture: touchend/click/keydown).
   const wakeAudio = () => { if (game.audio.state !== 'running') game.audio.unlock(); };
   for (const ev of ['touchend', 'click', 'keydown']) addEventListener(ev, wakeAudio, { capture: true, passive: true });
+  // If the browser stops the sound (tab / app switch) and it cannot restart by itself, offer a tap.
+  const soundBtn = document.createElement('button');
+  soundBtn.className = 'sound-btn'; soundBtn.innerHTML = '<span>🔇</span> Tap to turn the sound back on';
+  soundBtn.addEventListener('click', () => { game.audio.unlock(); soundBtn.classList.remove('on'); });
+  ui.appendChild(soundBtn);
+  let needSince = 0;
+  setInterval(() => {
+    const need = game.audio.needsTap;
+    needSince = need ? (needSince || performance.now()) : 0;
+    soundBtn.classList.toggle('on', !!need && performance.now() - needSince > 900);
+  }, 300);
   await loadCharacters();
   progress(0.15);
   await game.world.load((v) => progress(0.15 + v * 0.75));
