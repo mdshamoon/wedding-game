@@ -2,6 +2,8 @@
 
 A playable 3D story of the wedding, set on the **real roads of Kichha and Baheri**. It runs in any modern browser on phones and laptops, styled to match the [wedding card](https://mdshamoon.github.io/wedding-card/wedding).
 
+**Play it:** https://mdshamoon.github.io/wedding-game/
+
 ## Run it
 
 ```bash
@@ -49,11 +51,7 @@ npm run data
 
 ## Deploy (GitHub Pages, like the wedding card)
 
-```bash
-npm run build
-```
-
-Then publish the `dist/` folder, for example by pushing it to a `gh-pages` branch. The build uses relative paths, so it works from any sub-path.
+Every push to `main` builds the game and publishes it to https://mdshamoon.github.io/wedding-game/ through `.github/workflows/deploy.yml`. Check `npm run build` locally first if you like. The build uses relative paths, so it works from any sub-path.
 
 ## Credits
 - Roads: © OpenStreetMap contributors (ODbL)
