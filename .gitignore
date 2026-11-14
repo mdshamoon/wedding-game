@@ -1,0 +1,12 @@
+node_modules
+dist
+data/tilecache
+data/debug
+.DS_Store
+# personal photos and scratch folders: never publish
+*.jpeg
+*.jpg
+output
+tmp
+data/raw
+.claude
